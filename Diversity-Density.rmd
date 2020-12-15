@@ -5,26 +5,111 @@ date: "12/10/2020"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r}
+#Libraries
+library(tidyverse)
+library(neonUtilities)
+```
+First, I'll practice combining subplots with HARV data. From data info:
+"Generating a comprehensive list of plant species for an entire plot requires the aggregatoion of tables. Appropriately linking presence of species documented in the 1m2
+subplots and published in table div_1m2Data with species documented in 10 and 100m2
+subplots published in table div_10m2Data100m2Data_pub requires the correct named locaƟon (siteID and plotID), year, and bout. This sampling event is captured in the field eventID (plotID.boutNumber.year, e.g., STEI_001.1.2020) that can be used to link the tables. If this field is not populated, it can be created by aggregaƟng the fields plotID, boutNumber, and year (subset from endDate)."
+
+This field is not yet populated, so I will have to populate it myself. Then I can find the species richness.  
+
+```{r}
+HARV_data <- loadByProduct(dpID = "DP1.10058.001",
+                            site = c("HARV"),
+                            check.size = F)
+
+#Unlist to Rstudio environment
+list2env(HARV_data, .GlobalEnv)
+
+#Need to populate eventID for both 1m and 10m/100m tables
+div_1m2Data = mutate(div_1m2Data,
+       eventID = paste(plotID, boutNumber, str_sub(endDate, 1, 4), sep = "."))
+div_10m2Data100m2Data =  mutate(div_10m2Data100m2Data,
+       eventID = paste(plotID, boutNumber, str_sub(endDate, 1, 4), sep = "."))
+
+#Just grab what we need (we'll leave out percentCover for now, even though we'll use it for density later)
+species_1m2 <- div_1m2Data %>% 
+  filter(divDataType == 'plantSpecies') %>%
+  select(domainID, siteID, nlcdClass, plotID, endDate, taxonID, scientificName, taxonRank, family, eventID)
+
+species_10m2_100m2 <- div_10m2Data100m2Data %>% 
+  select(domainID, siteID, nlcdClass, plotID, endDate, taxonID, scientificName, taxonRank, family, eventID)
+
+# Now we can combine with rbind
+species <- rbind(species_1m2, species_10m2_100m2)
+
+# Now we have to get species count for each unique eventID
+# FIXME I have to account for duplicate species, right now I am over counting species richness
+species_per_event <- as.data.frame(table(species$eventID))
+
+# Add back the plotID
+species_per_event <- mutate(species_per_event,
+                            plotID = str_sub(Var1, 1, 8))
+
+# For now I'll do all of the years, but I wonder if we should cut the most recent year since they seem a lot different, we can see this in the distribution, such as in plot 6
+HARV006_species <- species %>% filter(plotID == 'HARV_006')
+ggplot(data = HARV006_species, aes(x = endDate)) +
+  geom_histogram()
+
+# Find the average for each plot across all years
+# FIXME I would like to be able to include other plot info in this data frame
+by_plot <- group_by(species_per_event, plotID)
+summarise(by_plot, speciesRichness = mean(Freq))
+
+
+```
+Now that I have the species richness for each plot I will use the sum of percentCover as a measurement for density, although I am not sure whether this is actually a good estimate of density as it is only taken on the 1m2 plots and is done ocularly without getting a count on how many individuals there are. I would need counts of individual plants on these sites which I may be able to get with the woody and herbaceous datasets, but I will look at that later this week.
+
+Note: Percent cover is measured in 6 1m2 subplots, but Prior to 2019: Two addiƟonal 1 and 10m2
+subplots were sampled. The presence and percent cover
+of species and ancillary data was observed in eight 1m2
+subplots. 
+
+Because of this, I will sum up total percent coverage of each subplot then take the average of all subplots for the year, and finally the average of all years
+
+Note on percentages: "estimates should not exceed 100
+percent for a single species, but the combined cover of multiple species – even just the biotic
+component of the observation - may be greater than 100%""
+
+```{r}
+# Select percentCover from data
+coverage_1m2 <- div_1m2Data %>% 
+  filter(divDataType == 'plantSpecies') %>%
+  select(domainID, siteID, taxonID,plotID, endDate, subplotID, eventID, percentCover)
+
+# Make an extended eventID to include subplotID, so we can group by individual 1m2 subplots
+coverage_1m2 <- mutate(coverage_1m2,
+                       eEventID = paste(eventID, subplotID, sep = "."))
+
+# Get sum percent cover for each unique subplot
+by_subplot <- group_by(coverage_1m2, eEventID)
+
+subplot_coverage <- summarise(by_subplot, totalCoverage = sum(percentCover, na.rm = TRUE))
+
+# Why are some percentages for single species over 100%?
+
+ggplot(data = subplot_coverage, aes(totalCoverage)) +
+  geom_histogram() +
+  coord_cartesian(ylim = c(0, 40), xlim = c(100, 250))
+
+# Now we can get an average for each year
+
 ```
 
-## R Markdown
+```{r}
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+#Download plant presence data for all sites where data is available
+PlantPresence_data <- loadByProduct(dpID = "DP1.10058.001", 
+                                    check.size = F)
+#Unlist to Rstudio environment
+list2env(PlantPresence_data, .GlobalEnv)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+#Select relevent columns
 
-```{r cars}
-summary(cars)
+
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
