@@ -5,6 +5,7 @@ date: "12/10/2020"
 output: html_document
 ---
 
+Include tidyverse and neonUtilities in order to get plant coverage data
 ```{r}
 #Libraries
 library(tidyverse)
@@ -194,7 +195,6 @@ species_per_event <- mutate(species_per_event,
                             plotID = str_sub(Var1, 1, 8))
 
 # Find the average for each plot across all years
-# FIXME I would like to be able to include other plot info in this data frame
 by_plot <- group_by(species_per_event, plotID)
 SpeciesRichness <- as.data.frame(summarise(by_plot, speciesRichness = mean(Freq)))
 
@@ -250,9 +250,61 @@ map <- lm(speciesRichness ~ density,
 summary(map)
 
 ```
+I'm not sure exactly when to take the log of the y-axis, but there did seem to be some high outliers, so I tried it out.
 
+
+```{r}
+# Not sure 
+ggplot(Analysis, aes(x = density, y = log(speciesRichness))) +
+  geom_point()+
+  geom_smooth(method = "lm")  #linear regression plot
+
+```
 Lets join some of the original information together with Analysis and see if we can find any patterns
 
 ```{r}
+extra_Info <- div_1m2Data %>% 
+  filter(divDataType == 'plantSpecies') %>%
+  filter(year < 2018) %>%
+  select(domainID, siteID, elevation, nlcdClass, plotID)
+
+
+# Remove duplicate plotIDs
+plot_Info <- extra_Info %>% distinct(extra_Info$plotID, .keep_all = TRUE)
+
+#Join with Analysis
+Analysis <- left_join(Analysis, plot_Info, 
+               by=c('plotID'))
+
+# By plot
+ggplot(Analysis, aes(x = density, y = speciesRichness, color = siteID)) +
+  geom_point() +
+  geom_smooth(method = "lm")  #linear regression plot
+
+# By domain
+ggplot(Analysis, aes(x = density, y = speciesRichness, color = domainID)) +
+  geom_point() +
+  geom_smooth(method = "lm")  #linear regression plot
+
+# By nlcd class
+ggplot(Analysis, aes(x = density, y = speciesRichness, color = nlcdClass)) +
+  geom_point()+
+  geom_smooth(method = "lm")  #linear regression plot
+# By elevation
+ggplot(Analysis, aes(x = density, y = speciesRichness, color = elevation)) +
+  geom_point()+
+  geom_smooth(method = "lm")  #linear regression plot
+```
+
+These graphs are incredibly messy when linear regression lines are included, but they do seem to indicate that this relationship does not hold for all sites. Just for fun, let's look at the nlcd(national land cover database) class and see if there are any clear patterns
+
+```{r}
+
+ggplot(data = Analysis) + 
+  geom_point(mapping = aes(x = density, y = speciesRichness, color = nlcdClass))  +
+  geom_smooth(method = "lm", mapping = aes(x = density, y = speciesRichness), color = "grey21") + 
+  facet_wrap(~ nlcdClass, nrow = 3) + 
+  theme(legend.position = "none")
 
 ```
+We can see the linear regression definitely seems to vary according to the land cover class, but more analysis would have to be done. 
