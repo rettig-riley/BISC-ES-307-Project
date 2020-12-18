@@ -31,20 +31,33 @@ div_1m2Data = mutate(div_1m2Data,
 div_10m2Data100m2Data =  mutate(div_10m2Data100m2Data,
        eventID = paste(plotID, boutNumber, str_sub(endDate, 1, 4), sep = "."))
 
-#Just grab what we need (we'll leave out percentCover for now, even though we'll use it for density later)
+# Add column for year
+div_1m2Data = mutate(div_1m2Data,
+                     year = str_sub(endDate, 1, 4))
+div_10m2Data100m2Data = mutate(div_10m2Data100m2Data,
+                     year = str_sub(endDate, 1, 4))
+
+# Just grab what we need (we'll leave out percentCover for now, even though we'll use it for density later)
+# Filter out last two years since they are irregular
 species_1m2 <- div_1m2Data %>% 
   filter(divDataType == 'plantSpecies') %>%
+  filter(year < 2018) %>%
   select(domainID, siteID, nlcdClass, plotID, endDate, taxonID, scientificName, taxonRank, family, eventID)
 
 species_10m2_100m2 <- div_10m2Data100m2Data %>% 
+  filter(year < 2018) %>%
   select(domainID, siteID, nlcdClass, plotID, endDate, taxonID, scientificName, taxonRank, family, eventID)
 
 # Now we can combine with rbind
 species <- rbind(species_1m2, species_10m2_100m2)
 
+# Remove duplicate species
+uniqueSpecies <- species %>% distinct(species$eventID, species$taxonID, .keep_all = TRUE)
+
 # Now we have to get species count for each unique eventID
-# FIXME I have to account for duplicate species, right now I am over counting species richness
-species_per_event <- as.data.frame(table(species$eventID))
+species_per_event <- as.data.frame(table(uniqueSpecies$eventID))
+
+
 
 # Add back the plotID
 species_per_event <- mutate(species_per_event,
@@ -58,7 +71,7 @@ ggplot(data = HARV006_species, aes(x = endDate)) +
 # Find the average for each plot across all years
 # FIXME I would like to be able to include other plot info in this data frame
 by_plot <- group_by(species_per_event, plotID)
-summarise(by_plot, speciesRichness = mean(Freq))
+HARV_SR <- as.data.frame(summarise(by_plot, speciesRichness = mean(Freq)))
 
 
 ```
@@ -78,38 +91,168 @@ component of the observation - may be greater than 100%""
 ```{r}
 # Select percentCover from data
 coverage_1m2 <- div_1m2Data %>% 
+  filter(year < 2018) %>%
   filter(divDataType == 'plantSpecies') %>%
-  select(domainID, siteID, taxonID,plotID, endDate, subplotID, eventID, percentCover)
+  select(domainID, siteID, taxonID,plotID, endDate, subplotID, eventID, percentCover, year)
 
-# Make an extended eventID to include subplotID, so we can group by individual 1m2 subplots
-coverage_1m2 <- mutate(coverage_1m2,
-                       eEventID = paste(eventID, subplotID, sep = "."))
-
-# Get sum percent cover for each unique subplot
-by_subplot <- group_by(coverage_1m2, eEventID)
+# Get sum percent cover for each unique subplot by grouping by subplotID
+by_subplot <- group_by(coverage_1m2, subplotID, eventID, siteID, plotID, endDate, year)
 
 subplot_coverage <- summarise(by_subplot, totalCoverage = sum(percentCover, na.rm = TRUE))
 
-# Why are some percentages for single species over 100%?
-
+#Some percentages are over 100%, but this is okay
 ggplot(data = subplot_coverage, aes(totalCoverage)) +
-  geom_histogram() +
-  coord_cartesian(ylim = c(0, 40), xlim = c(100, 250))
+  geom_histogram() 
+#+
+#  coord_cartesian(ylim = c(0, 40), xlim = c(100, 250))
 
 # Now we can get an average for each year
+by_year <- group_by(subplot_coverage, plotID)
+HARV_density <-  summarise(by_year, density = mean(totalCoverage))
+```
+
+Now we can look at the relationship between diversity and density at the HARV site
+
+```{r}
+# join the two tables together
+HARV_analysis <- left_join(HARV_SR, HARV_density, 
+               by=c('plotID'))
+
+# Create a scatterplot
+ggplot(HARV_analysis, aes(x = density, y = speciesRichness)) +
+  geom_point()+
+  geom_smooth(method = "lm")  #linear regression plot
+
+# Pearson's correlation coeficient
+# Species Richness is positively correlated with density at HARV (r(31) = 0.71, p < 0.01)
+cor.test(HARV_analysis$speciesRichness,
+         HARV_analysis$density)
+
+# Linear Regression
+# species richness linear regression (b = 0.81, t(31) = 0.494, p < 0.01)
+# There was a significant increase in species richness with increasing density
+HARVmap <- lm(speciesRichness ~ density, 
+                    data = HARV_analysis)
+summary(HARVmap)
 
 ```
 
+Now we'll scale this up to all sites and see whether the same holds true!
+
 ```{r}
 
-#Download plant presence data for all sites where data is available
+#Download plant presence data for all sites where data is available 
 PlantPresence_data <- loadByProduct(dpID = "DP1.10058.001", 
                                     check.size = F)
 #Unlist to Rstudio environment
 list2env(PlantPresence_data, .GlobalEnv)
 
-#Select relevent columns
+
+```
+
+
+
+
+```{r}
+
+#Need to populate eventID for both 1m and 10m/100m tables
+div_1m2Data = mutate(div_1m2Data,
+       eventID = paste(plotID, boutNumber, str_sub(endDate, 1, 4), sep = "."))
+div_10m2Data100m2Data =  mutate(div_10m2Data100m2Data,
+       eventID = paste(plotID, boutNumber, str_sub(endDate, 1, 4), sep = "."))
+
+# Add column for year
+div_1m2Data = mutate(div_1m2Data,
+                     year = str_sub(endDate, 1, 4))
+div_10m2Data100m2Data = mutate(div_10m2Data100m2Data,
+                     year = str_sub(endDate, 1, 4))
+
+# Just grab what we need (we'll leave out percentCover for now, even though we'll use it for density later)
+# Filter out last two years since they are irregular
+species_1m2 <- div_1m2Data %>% 
+  filter(divDataType == 'plantSpecies') %>%
+  filter(year < 2018) %>%
+  select(domainID, siteID, nlcdClass, plotID, endDate, taxonID, scientificName, taxonRank, family, eventID)
+
+species_10m2_100m2 <- div_10m2Data100m2Data %>% 
+  filter(year < 2018) %>%
+  select(domainID, siteID, nlcdClass, plotID, endDate, taxonID, scientificName, taxonRank, family, eventID)
+
+# Now we can combine with rbind
+species <- rbind(species_1m2, species_10m2_100m2)
+
+# Remove duplicate species
+uniqueSpecies <- species %>% distinct(species$eventID, species$taxonID, .keep_all = TRUE)
+
+# Now we have to get species count for each unique eventID
+species_per_event <- as.data.frame(table(uniqueSpecies$eventID))
+
+
+
+# Add back the plotID
+species_per_event <- mutate(species_per_event,
+                            plotID = str_sub(Var1, 1, 8))
+
+# Find the average for each plot across all years
+# FIXME I would like to be able to include other plot info in this data frame
+by_plot <- group_by(species_per_event, plotID)
+SpeciesRichness <- as.data.frame(summarise(by_plot, speciesRichness = mean(Freq)))
 
 
 ```
 
+
+```{r}
+# Select percentCover from data
+coverage_1m2 <- div_1m2Data %>% 
+  filter(year < 2018) %>%
+  filter(divDataType == 'plantSpecies') %>%
+  select(domainID, siteID, taxonID,plotID, endDate, subplotID, eventID, percentCover, year)
+
+# Get sum percent cover for each unique subplot by grouping by subplotID
+by_subplot <- group_by(coverage_1m2, subplotID, eventID, siteID, plotID, endDate, year)
+
+subplot_coverage <- summarise(by_subplot, totalCoverage = sum(percentCover, na.rm = TRUE))
+
+#Some percentages are again over 100%, but this is okay
+ggplot(data = subplot_coverage, aes(totalCoverage)) +
+  geom_histogram() 
+#+
+#  coord_cartesian(ylim = c(0, 40), xlim = c(100, 250))
+
+# Now we can get an average for each year
+by_year <- group_by(subplot_coverage, plotID)
+Density <-  summarise(by_year, density = mean(totalCoverage))
+```
+
+Now we can look at the relationship between diversity and density at all sites, and we find that they are still positively correlated. 
+
+```{r}
+# join the two tables together
+Analysis <- left_join(SpeciesRichness, Density, 
+               by=c('plotID'))
+
+# Create a scatterplot
+ggplot(Analysis, aes(x = density, y = speciesRichness)) +
+  geom_point()+
+  geom_smooth(method = "lm")  #linear regression plot
+
+# Pearson's correlation coeficient
+# Species Richness is positively correlated with density at HARV (r(1376) = 0.37, p < 0.01)
+cor.test(Analysis$speciesRichness,
+         Analysis$density)
+
+# Linear Regression
+# species richness linear regression (b = 0.33, t(1376) = 0.1354, p < 0.01)
+# There was a significant increase in species richness with increasing density
+map <- lm(speciesRichness ~ density, 
+                    data = Analysis)
+summary(map)
+
+```
+
+Lets join some of the original information together with Analysis and see if we can find any patterns
+
+```{r}
+
+```
